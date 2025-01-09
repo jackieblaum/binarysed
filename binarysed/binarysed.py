@@ -354,11 +354,8 @@ class SED:
         wavelengths = np.array(self.sed_dict["wavelengths"])
         fluxes = np.array(self.sed_dict["fluxes"])
         flux_errors = np.array(self.sed_dict["flux_errs"])
-        ra = self.sed_dict["RA"]
-        dec = self.sed_dict["DEC"]
-        dist = self.sed_dict["dist"]
         model_fluxes, model_wavelengths = self.create_apparent_sed(
-            wavelengths, teff1, teff2, requiv1, requiv2, logg1, logg2, Z, dist, ra, dec
+            wavelengths, teff1, teff2, requiv1, requiv2, logg1, logg2
         )
 
         if fig is None and ax is None:
