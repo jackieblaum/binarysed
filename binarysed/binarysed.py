@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
 import math
+import os
 from pystellibs import BaSeL, Kurucz
 from extinction import ccm89, apply, remove
 import pyphot
-from scipy.interpolate import interp1d
-from dustmaps.sfd import SFDQuery
+# from dustmaps.sfd import SFDQuery
+from dustmaps.edenhofer2023 import Edenhofer2023Query
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 from matplotlib import pyplot as plt
@@ -76,7 +77,14 @@ class SED:
 
     def __init__(self, sed_dict):
         self.sed_dict = sed_dict
-        self.sfd = SFDQuery()
+        # self.sfd = SFDQuery()
+        self.edenhofer = Edenhofer2023Query(integrated=True)
+        binarysed_dir = os.path.dirname(os.path.abspath(__file__))
+        extinction_curve_path = os.path.join(binarysed_dir, "docs", "extinction_curve.txt")
+        self.extinction_curve = pd.read_csv(extinction_curve_path, delim_whitespace=True, 
+                            names=["wavelength", "extinction_curve"], skiprows=1)
+        print(f"wavelengths: {self.extinction_curve['wavelength']}")
+
 
     def get_obs_fluxes(self):
         return self.sed_dict["fluxes"]
@@ -145,29 +153,26 @@ class SED:
                 ),
             }
         )
-        # Interpolate over the Kurucz SED to get the flux values at the desired model wavelengths 
-        # (rather than just the Kurucz wavelengths)
-        # The interpolation is done in log-log space
-        f = interp1d(
-            np.log10(sed["wavelength"][: -len(wavelengths)]),
-            np.log10(sed["flux"][: -len(wavelengths)]),
-            kind="linear",
-        )
+        
         # Sort the SED by wavelength
         sed_interp = sed.sort_values(by="wavelength")
 
         # Select the flux values at only the specified wavelengths
         for wave in wavelengths:
-            # Interpolate the flux values at the desired wavelengths
-            flux_interpolated = f(np.log10(wave))
+            # The interpolation is done in log-log space
+            # Interpolate over the Kurucz SED to get the flux values at the desired model wavelengths 
+            # (rather than just the Kurucz wavelengths)
+            flux_interpolated = np.interp(np.log10(wave), np.log10(sed["wavelength"][: -len(wavelengths)]),
+                                          np.log10(sed["flux"][: -len(wavelengths)]))
             # Store the interpolated flux values in the DataFrame after converting back to linear space
             sed_interp.loc[sed_interp["wavelength"] == wave, "flux"] = (
                 10**flux_interpolated
             )
 
+        wavelength_range = (sed_interp["wavelength"] > 1000) & (sed_interp["wavelength"] < 3e5)
         # Create a DataFrame of the interpolated SED
         sed_df = pd.DataFrame(
-            {"wavelength": sed_interp["wavelength"], "flux": sed_interp["flux"]}
+            {"wavelength": sed_interp["wavelength"].loc[wavelength_range], "flux": sed_interp["flux"][wavelength_range]}
         )
 
         # Return the intrinsic SED based on the given distance (wavelength in angstroms, flux in erg/cm2/s/AA)
@@ -245,29 +250,39 @@ class SED:
         comb_sed = merged_seds.groupby("wavelength").agg({"flux": "sum"}).reset_index()
 
         # Get the galactic latitude from RA/DEC
-        coord = SkyCoord(ra=RA * u.degree, dec=DEC * u.degree, frame="icrs")
+        coord = SkyCoord(ra=RA * u.degree, dec=DEC * u.degree, distance=dist * u.pc, frame="icrs")
         galactic_coord = coord.galactic
-        galactic_latitude = galactic_coord.b.degree
+        # galactic_latitude = galactic_coord.b.degree
 
         # Get the SFD color excess: E(B-V) from the Schlegel, Finkbeiner, & Davis (1998) dust map
-        ebv_sfd = self.sfd(coord)
+        # ebv_sfd = self.sfd(coord)
+        A_ZGR23 = self.edenhofer(coord)
+        print(f"A (unitless): {A_ZGR23}")
         # Calculate the height above the Galactic plane
-        z = calculate_z(dist, galactic_latitude)
-        # Calculate the effective extinction E(B-V)_eff based on the height above the Galactic plane and the SFD extinction value
-        ebv_eff = calculate_effective_extinction(ebv_sfd, z)
+        # z = calculate_z(dist, galactic_latitude)
+        # # Calculate the effective extinction E(B-V)_eff based on the height above the Galactic plane and the SFD extinction value
+        # ebv_eff = calculate_effective_extinction(ebv_sfd, z)
 
-        # Check that the effective color excess is less than the SFD color excess, otherwise throw an error
-        if ebv_eff > ebv_sfd:
-            raise ValueError(
-                "Effective extinction cannot be greater than SFD extinction."
-            )
+        # # Check that the effective color excess is less than the SFD color excess, otherwise throw an error
+        # if ebv_eff > ebv_sfd:
+        #     raise ValueError(
+        #         "Effective extinction cannot be greater than SFD extinction."
+        #     )
 
-        # Calculate the effective extinction A_V based on the effective color excess and the extinction law
-        A_V = R_V * ebv_eff
+        # # Calculate the effective extinction A_V based on the effective color excess and the extinction law
+        # A_V = R_V * ebv_eff
 
         # Apply extinction (Cardelli, Clayton, & Mathis 1989) to the combined SED to get the reddened apparent SED
+        print(f"observed wavelengths/10: {comb_sed.wavelength.values/10}")
+        extinction_coefficients = np.interp(comb_sed.wavelength.values/10,
+                                            self.extinction_curve["wavelength"],
+                                            self.extinction_curve["extinction_curve"])
+        print(f"extinction coefficients: {extinction_coefficients}")
+        A_lambdas = A_ZGR23 * extinction_coefficients
+        print(f"A_lambdas: {A_lambdas}")
+
         comb_sed["apparent_flux"] = apply(
-            ccm89(comb_sed.wavelength.values, A_V, R_V), comb_sed["flux"].values
+            A_lambdas, comb_sed["flux"].values
         )
 
         # Check that all apparent fluxes with reddening are <= the original fluxes, otherwise throw an error
@@ -281,6 +296,7 @@ class SED:
         if select_wavelengths:
             return comb_sed["apparent_flux"]  # Return model only at desired wavelengths
         else:
+            print('Returning apparent SED')
             return (
                 comb_sed["apparent_flux"],
                 comb_sed["wavelength"],
@@ -383,7 +399,7 @@ class SED:
             ax.set_ylabel(r"$\lambda F_\lambda~[\rm erg/cm^2/s]$", fontsize=24)
             ax.set_yscale("log")
             ax.set_xscale("log")
-            for filt in self.data_dict["filters"]:
+            for filt in self.sed_dict["filters"]:
                 ax.vlines(
                     wavelengths / 10,
                     ymin=10**-14,
