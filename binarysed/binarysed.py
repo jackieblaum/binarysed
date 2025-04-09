@@ -328,8 +328,8 @@ class SED:
         ax.set_ylabel(r"$\lambda F_\lambda~[\rm erg/cm^2/s]$", fontsize=24)
         ax.errorbar(
             np.array(wavelengths) / 10,
-            fluxes * np.array(wavelengths) / 10,
-            yerr=flux_errors * np.array(wavelengths) / 10,
+            fluxes * np.array(wavelengths),
+            yerr=flux_errors * np.array(wavelengths),
             label="Data",
             marker=".",
             linestyle="None",
@@ -413,8 +413,8 @@ class SED:
             plt.xlim(10**2, 10**5)
             ax.errorbar(
                 wavelengths / 10,
-                fluxes * np.array(wavelengths) / 10,
-                yerr=flux_errors * np.array(wavelengths) / 10,
+                fluxes * np.array(wavelengths),
+                yerr=flux_errors * np.array(wavelengths),
                 label="Data",
                 marker=".",
                 linestyle="None",
@@ -426,7 +426,7 @@ class SED:
 
         ax.plot(
             np.array(model_wavelengths) / 10,
-            model_fluxes * np.array(model_wavelengths) / 10,
+            model_fluxes * np.array(model_wavelengths),
         )
 
         return fig, ax
