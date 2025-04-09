@@ -10,6 +10,9 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/jackieblaum/binarysed",
     packages=find_packages(),  # Automatically find and include all packages
+    include_package_data=True,
+    package_data={
+        "binarysed": ["docs/extinction_curve.txt"] },
     install_requires=[
         "numpy",
         "pandas",
